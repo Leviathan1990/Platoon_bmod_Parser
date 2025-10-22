@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Text;
 using System.Collections.Generic;
@@ -23,9 +23,23 @@ namespace BmodReader
         public List<T> GetChunks<T>() where T : BmodChunk
         {
             var result = new List<T>();
+
             foreach (var chunk in Chunks)
+            {
+                // Add chunk if it matches type
                 if (chunk is T typedChunk)
+                {
                     result.Add(typedChunk);
+                }
+
+                // ✅ ÚJ: Check OBST sub-chunks
+                if (chunk is ObstChunk obst)
+                {
+                    if (obst.MeshChunk is T meshAsT)
+                        result.Add(meshAsT);
+                }
+            }
+
             return result;
         }
 
@@ -183,8 +197,26 @@ namespace BmodReader
                 while (_reader.BaseStream.Position < meshEnd)
                 {
                     long subChunkStart = _reader.BaseStream.Position;
+
+                    // Check if enough space for chunk header
+                    long remaining = meshEnd - subChunkStart;
+                    if (remaining < 8)
+                    {
+                        Console.WriteLine($"    (End of MESH, {remaining} bytes remaining)");
+                        break;
+                    }
+
+                    // Read chunk header
                     string subChunkId = ReadFourCC();
                     uint subChunkSize = _reader.ReadUInt32();
+
+                    // ✅ CRITICAL: Validate chunk size
+                    if (subChunkSize == 0 || subChunkSize < 8 || subChunkSize > remaining)
+                    {
+                        Console.WriteLine($"    ⚠ Invalid sub-chunk size: {subChunkSize} (remaining: {remaining}), stopping MESH parsing");
+                        _reader.BaseStream.Position = subChunkStart; // Reset position
+                        break;
+                    }
 
                     Console.WriteLine($"    Sub-chunk: {subChunkId} ({subChunkSize} bytes)");
 
@@ -599,14 +631,21 @@ namespace BmodReader
             try
             {
                 chunk.ObjectNumber = _reader.ReadUInt32();
-                chunk.Name = ReadFixedString(260).Trim('\0');  // ✅ FIX STRING (260 bytes)
+
+                // Variable-length string
+                uint nameLength = _reader.ReadUInt32();
+                chunk.Name = "";
+                if (nameLength > 0 && nameLength < 1024)  // Sanity check
+                {
+                    chunk.Name = ReadString((int)nameLength);
+                }
 
                 Console.WriteLine($"  → Object #{chunk.ObjectNumber}: {chunk.Name}");
 
                 // Read unknown data (68 bytes)
                 chunk.UnknownData = _reader.ReadBytes(68);
 
-                // ✅ ÚJ: Parse sub-chunks (MESH, MBOX, OBOX, etc.)
+                // Parse sub-chunks
                 long obstEnd = dataStart + size - 8;
 
                 while (_reader.BaseStream.Position < obstEnd)
@@ -614,25 +653,32 @@ namespace BmodReader
                     long subChunkStart = _reader.BaseStream.Position;
 
                     // Check if enough space for chunk header
-                    if (obstEnd - subChunkStart < 8)
+                    long remaining = obstEnd - subChunkStart;
+                    if (remaining < 8)
                     {
-                        Console.WriteLine($"    (End of OBST, {obstEnd - subChunkStart} bytes remaining)");
+                        Console.WriteLine($"    (End of OBST, {remaining} bytes remaining)");
                         break;
                     }
 
-                    // Peek at chunk ID to see what's coming
+                    // Read chunk header
                     string subChunkId = ReadFourCC();
                     uint subChunkSize = _reader.ReadUInt32();
 
+                    // ✅ CRITICAL: Validate chunk size
+                    if (subChunkSize == 0 || subChunkSize < 8 || subChunkSize > remaining)
+                    {
+                        Console.WriteLine($"    ⚠ Invalid sub-chunk size: {subChunkSize} (remaining: {remaining}), stopping OBST parsing");
+                        _reader.BaseStream.Position = subChunkStart; // Reset position
+                        break;
+                    }
+
                     Console.WriteLine($"    Sub-chunk: {subChunkId} ({subChunkSize} bytes)");
 
-                    // Reset position to start of sub-chunk
+                    // Reset position to parse full chunk
                     _reader.BaseStream.Position = subChunkStart;
-
-                    // Parse sub-chunk using existing chunk parsers
                     var subChunk = ReadChunk();
 
-                    // Store important sub-chunks in OBST
+                    // Store important sub-chunks
                     if (subChunk is MeshChunk mesh)
                     {
                         chunk.MeshChunk = mesh;
