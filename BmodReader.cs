@@ -184,37 +184,28 @@ namespace BmodReader
 
             try
             {
-                // Read MESH header (12 bytes)
                 chunk.Unknown = _reader.ReadUInt32();
-                chunk.VertexCount = _reader.ReadUInt32();
+                chunk.VertexCount = _reader.ReadUInt32();  // ✅ EZ A HELYES SZÁM!
                 chunk.FaceCount = _reader.ReadUInt32();
 
                 Console.WriteLine($"  → Vertices: {chunk.VertexCount}, Faces: {chunk.FaceCount}");
 
-                // Read sub-chunks
                 long meshEnd = dataStart + size - 8;
 
                 while (_reader.BaseStream.Position < meshEnd)
                 {
                     long subChunkStart = _reader.BaseStream.Position;
-
-                    // Check if enough space for chunk header
                     long remaining = meshEnd - subChunkStart;
-                    if (remaining < 8)
-                    {
-                        Console.WriteLine($"    (End of MESH, {remaining} bytes remaining)");
-                        break;
-                    }
 
-                    // Read chunk header
+                    if (remaining < 8) break;
+
                     string subChunkId = ReadFourCC();
                     uint subChunkSize = _reader.ReadUInt32();
 
-                    // ✅ CRITICAL: Validate chunk size
                     if (subChunkSize == 0 || subChunkSize < 8 || subChunkSize > remaining)
                     {
-                        Console.WriteLine($"    ⚠ Invalid sub-chunk size: {subChunkSize} (remaining: {remaining}), stopping MESH parsing");
-                        _reader.BaseStream.Position = subChunkStart; // Reset position
+                        Console.WriteLine($"    ⚠ Invalid sub-chunk size: {subChunkSize}, stopping");
+                        _reader.BaseStream.Position = subChunkStart;
                         break;
                     }
 
@@ -223,7 +214,8 @@ namespace BmodReader
                     switch (subChunkId)
                     {
                         case "VERT":
-                            chunk.VertChunk = ReadVertChunkInMesh(subChunkId, subChunkSize, subChunkStart + 8);
+                            // ✅ PASS THE EXPECTED VERTEX COUNT!
+                            chunk.VertChunk = ReadVertChunkInMesh(subChunkId, subChunkSize, subChunkStart + 8, chunk.VertexCount);
                             break;
 
                         case "ISTR":
@@ -231,7 +223,6 @@ namespace BmodReader
                             break;
 
                         case "FACE":
-                            // Skip for now
                             _reader.BaseStream.Seek(subChunkStart + subChunkSize, SeekOrigin.Begin);
                             break;
 
@@ -266,37 +257,94 @@ namespace BmodReader
             return chunk;
         }
 
-        private VertChunk ReadVertChunkInMesh(string id, uint size, long dataStart)
+        private VertChunk ReadVertChunkInMesh(string id, uint size, long dataStart, uint expectedVertexCount)
         {
             var chunk = new VertChunk { ChunkId = id, ChunkSize = size, ChunkDataStart = dataStart };
 
-            // Read VERT header
-            chunk.Unknown1 = _reader.ReadByte();
-            chunk.Unknown2 = _reader.ReadByte();
-            chunk.StartIndex = _reader.ReadUInt32();
-            chunk.EndIndex = _reader.ReadUInt32();
-            chunk.TriangleCount = _reader.ReadUInt32();
-            chunk.Unknown3 = _reader.ReadUInt32();
-            chunk.Unknown4 = _reader.ReadUInt32();
-            chunk.Unknown5 = _reader.ReadUInt32();
-
-            Console.WriteLine($"      VERT: Start={chunk.StartIndex}, End={chunk.EndIndex}, Tris={chunk.TriangleCount}");
-
-            // Calculate vertex count
-            long headerSize = 26; // 2 bytes + 6×uint32
-            long dataSize = size - 8 - headerSize;
-            int vertexCount = (int)(dataSize / Vertex.SizeInBytes);
-
-            Console.WriteLine($"      Reading {vertexCount} vertices...");
-
-            // Read vertices (32 bytes each)
-            for (int i = 0; i < vertexCount; i++)
+            try
             {
-                var vertex = new Vertex();
-                vertex.Position = ReadVector3();
-                vertex.Normal = ReadVector3();
-                vertex.UV = ReadVector2();
-                chunk.Vertices.Add(vertex);
+                // ✅ VERT header: 12 bytes
+                uint faceCount = _reader.ReadUInt32();
+                uint unknown1 = _reader.ReadUInt32();
+                uint unknown2 = _reader.ReadUInt32();
+
+                Console.WriteLine($"      VERT header: [faces={faceCount}, unk1={unknown1}, unk2={unknown2}]");
+                Console.WriteLine($"      Reading {expectedVertexCount} vertices (40 bytes each)...");
+
+                // ✅ Read vertices: 40 bytes each
+                for (int i = 0; i < expectedVertexCount; i++)
+                {
+                    var vertex = new Vertex();
+                    vertex.Position = ReadVector3();
+                    vertex.Normal = ReadVector3();
+                    vertex.Color = _reader.ReadUInt32();
+                    vertex.UV = ReadVector2();
+
+                    chunk.Vertices.Add(vertex);
+                }
+
+                Console.WriteLine($"      ✓ Read {chunk.Vertices.Count} vertices");
+
+                // ✅ Calculate remaining bytes
+                long bytesRead = 12 + (expectedVertexCount * 40);
+                long totalChunkData = size - 8;
+                long remaining = totalChunkData - bytesRead;
+
+                if (remaining > 0)
+                {
+                    Console.WriteLine($"      ℹ Remaining {remaining} bytes (tangent space data)");
+
+                    // ✅ TRY to read tangent/bitangent data (24 bytes per vertex)
+                    long expectedTangentSize = expectedVertexCount * 24;
+
+                    if (remaining >= expectedTangentSize - 100)  // Allow some padding tolerance
+                    {
+                        Console.WriteLine($"      Reading tangent/bitangent data (24 bytes/vertex)...");
+
+                        int tangentCount = (int)(remaining / 24);
+
+                        for (int i = 0; i < tangentCount && i < expectedVertexCount; i++)
+                        {
+                            Vector3 tangent = ReadVector3();      // 12 bytes
+                            Vector3 bitangent = ReadVector3();    // 12 bytes
+
+                            // ✅ Store in vertex
+                            if (i < chunk.Vertices.Count)
+                            {
+                                chunk.Vertices[i].Tangent = tangent;
+                                chunk.Vertices[i].Bitangent = bitangent;
+                            }
+
+                            if (i == 0)
+                            {
+                                Console.WriteLine($"        First tangent: {tangent}");
+                                Console.WriteLine($"        First bitangent: {bitangent}");
+                            }
+                        }
+
+                        long afterTangents = _reader.BaseStream.Position - dataStart - 8;
+                        long finalRemaining = totalChunkData - afterTangents;
+
+                        Console.WriteLine($"      ✓ Read tangent data for {tangentCount} vertices");
+
+                        if (finalRemaining > 0)
+                        {
+                            Console.WriteLine($"      ℹ {finalRemaining} bytes padding at end");
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"      Not enough data for full tangent set (need {expectedTangentSize}, have {remaining})");
+                    }
+                }
+
+                // Seek to end of chunk
+                _reader.BaseStream.Position = dataStart + size - 8;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"      ✗ Error: {ex.Message}");
+                _reader.BaseStream.Seek(dataStart + size - 8, SeekOrigin.Begin);
             }
 
             return chunk;
@@ -377,37 +425,73 @@ namespace BmodReader
         {
             var chunk = new ObmoChunk { ChunkId = id, ChunkSize = size, ChunkDataStart = dataStart };
 
-            // OBMO parsing is similar to MESH
-            // Read name first
-            var nameLen = _reader.ReadUInt32();
-            chunk.Name = ReadString((int)nameLen);
-
-            // Read sub-chunks
-            var endPos = dataStart + chunk.ChunkDataSize;
-            while (_reader.BaseStream.Position < endPos)
+            try
             {
-                var subChunkId = ReadFourCC();
-                var subChunkSize = _reader.ReadUInt32();
-                var subDataStart = _reader.BaseStream.Position;
-                var subDataSize = subChunkSize - 8;
+                // Read name first
+                var nameLen = _reader.ReadUInt32();
+                chunk.Name = ReadString((int)nameLen);
 
-                switch (subChunkId)
+                Console.WriteLine($"  → OBMO: {chunk.Name}");
+
+                // ✅ ÚJ: Read vertex/face counts (similar to MESH header)
+                uint unknown = _reader.ReadUInt32();
+                uint vertexCount = _reader.ReadUInt32();
+                uint faceCount = _reader.ReadUInt32();
+
+                Console.WriteLine($"  → Vertices: {vertexCount}, Faces: {faceCount}");
+
+                // Read sub-chunks
+                var endPos = dataStart + chunk.ChunkDataSize;
+
+                while (_reader.BaseStream.Position < endPos)
                 {
-                    case "VERT":
-                        chunk.VertChunk = ReadVertChunkInMesh(subChunkId, subChunkSize, subDataStart);
-                        break;
-                    case "ISTR":
-                        chunk.IstrChunk = ReadIstrChunk(subChunkId, subChunkSize, subDataStart);
-                        break;
-                    case "FACE":
-                        chunk.FaceChunk = ReadFaceChunk(subChunkId, subChunkSize, subDataStart);
-                        break;
-                    default:
-                        _reader.BaseStream.Position += subDataSize;
-                        break;
-                }
+                    long subChunkStart = _reader.BaseStream.Position;
+                    long remaining = endPos - subChunkStart;
 
-                _reader.BaseStream.Position = subDataStart + subDataSize;
+                    if (remaining < 8)
+                        break;
+
+                    var subChunkId = ReadFourCC();
+                    var subChunkSize = _reader.ReadUInt32();
+                    var subDataStart = _reader.BaseStream.Position;
+                    var subDataSize = subChunkSize - 8;
+
+                    // Validate
+                    if (subChunkSize < 8 || subChunkSize > remaining)
+                    {
+                        Console.WriteLine($"    ⚠ Invalid OBMO sub-chunk size: {subChunkSize}");
+                        break;
+                    }
+
+                    Console.WriteLine($"    Sub-chunk: {subChunkId} ({subChunkSize} bytes)");
+
+                    switch (subChunkId)
+                    {
+                        case "VERT":
+                            // ✅ PASS VERTEX COUNT!
+                            chunk.VertChunk = ReadVertChunkInMesh(subChunkId, subChunkSize, subDataStart, vertexCount);
+                            break;
+
+                        case "ISTR":
+                            chunk.IstrChunk = ReadIstrChunk(subChunkId, subChunkSize, subDataStart);
+                            break;
+
+                        case "FACE":
+                            chunk.FaceChunk = ReadFaceChunk(subChunkId, subChunkSize, subDataStart);
+                            break;
+
+                        default:
+                            _reader.BaseStream.Position += subDataSize;
+                            break;
+                    }
+
+                    _reader.BaseStream.Position = subDataStart + subDataSize;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  ✗ Error parsing OBMO: {ex.Message}");
+                _reader.BaseStream.Seek(dataStart + size - 8, SeekOrigin.Begin);
             }
 
             return chunk;
