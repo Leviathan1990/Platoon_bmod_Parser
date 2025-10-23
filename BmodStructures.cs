@@ -1,11 +1,10 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Text;
 using System.Collections.Generic;
 
 namespace BmodReader
 {
-
     public struct Color4
     {
         public float R, G, B, A;
@@ -74,8 +73,14 @@ namespace BmodReader
         public Vector3 Position;
         public Vector3 Normal;
         public Vector2 UV;
+        public uint Color;
+        //  Tangent space (normal mapping)
 
-        public const int SizeInBytes = 32; // 8 floats × 4 bytes
+        public Vector3 Tangent;     // 12 bytes
+        public Vector3 Bitangent;   // 12 bytes
+
+        public const int SizeInBytes = 40; // 40 bytes
+        public const int TangentSizeInBytes = 24; //    Tangent + Bitangent
     }
 
     // ============================================================================
