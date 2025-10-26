@@ -1,9 +1,10 @@
-//	Plat00n .bmod parser changelog.
+Plat00n .bmod parser changelog.
+=
 
-//  {V1.1}
+Actual version: V 1.1.
 
 [Software improvements]:
-+Full support for each .bmod files!
++  Full support for each .bmod files!
 
 [Additions]:
 +	Added custom location exporter function! Now you can extract the .obj, .tga and .mtl file to custom location!
@@ -20,8 +21,7 @@
 PREVIOUS EDITIONS
 =
 
-
-{V 1.0 Initial Edition}
+V 1.0 Initial Edition
 
 [Additions]:
 
