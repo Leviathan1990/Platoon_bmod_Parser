@@ -22,6 +22,7 @@ namespace BmodReader
                 foreach (var anim in boneChunk.Animations)
                 {
                     if (!firstBone) sb.AppendLine(",");
+                    sb.AppendLine();
                     firstBone = false;
 
                     sb.AppendLine("    {");
@@ -69,6 +70,11 @@ namespace BmodReader
             var sb = new StringBuilder();
 
             sb.AppendLine("HIERARCHY");
+
+            if (bmod.BoneChunks.Count == 0)
+            {
+                throw new InvalidOperationException("No animation data found in BMOD file.");
+            }
 
             foreach (var boneChunk in bmod.BoneChunks)
             {
