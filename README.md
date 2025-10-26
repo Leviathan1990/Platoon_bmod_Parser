@@ -1,6 +1,6 @@
 Bmod parser
 =
-Designed for the games Plat00n and Haegemonia developed by the Hungarian company, Digital Reality Kft. 
+Designed for the games "Platoon: The 1st Airborne Cavalry Division in Vietnam" and "Haegemonia - Legion of Iron" developed by the Hungarian company, Digital Reality Kft. 
 
 This project is part of the upcoming tool named, "Plat00n Modding tools GUI" that comes with the Plat00n Resurrection mod. This version was designed for the game Plat00n, but I'm currently working on the GUI version of the tool, which will also support Haegemonia. 
 
