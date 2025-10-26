@@ -524,30 +524,14 @@ namespace BmodReader
         private BoneChunk ReadBoneChunk(string id, uint size, long dataStart)
         {
             var chunk = new BoneChunk { ChunkId = id, ChunkSize = size, ChunkDataStart = dataStart };
-            chunk.BoneCount = _reader.ReadUInt32();
-            chunk.KeyframeCount = _reader.ReadUInt32();
 
-            for (int i = 0; i < chunk.BoneCount; i++)
-            {
-                var anim = new BoneAnimation();
-                anim.BoneId = _reader.ReadUInt32();
-                anim.ParentId = _reader.ReadInt32();
+            Console.WriteLine($"  → BONE chunk ({size} bytes) - skipping (animation data)");
+            Console.WriteLine($"  ℹ This file uses OBSK for skeleton structure");
 
-                var nameLen = _reader.ReadUInt32();
-                anim.Name = ReadString((int)nameLen);
-
-                for (int j = 0; j < chunk.KeyframeCount; j++)
-                {
-                    var keyframe = new BoneKeyframe();
-                    keyframe.Time = _reader.ReadSingle();
-                    keyframe.Position = ReadVector3();
-                    keyframe.Rotation = ReadQuaternion();
-                    keyframe.Scale = ReadVector3();
-                    anim.Keyframes.Add(keyframe);
-                }
-
-                chunk.Animations.Add(anim);
-            }
+            // ✅ SKIP THE ENTIRE BONE CHUNK
+            // Humans/*.bmod files have corrupted or non-standard BONE chunks
+            // The skeleton structure is in the OBSK chunk instead
+            _reader.BaseStream.Seek(dataStart + size - 8, SeekOrigin.Begin);
 
             return chunk;
         }
@@ -854,18 +838,7 @@ namespace BmodReader
             );
         }
 
-        private string ReadFixedString(int length)
-        {
-            var bytes = _reader.ReadBytes(length);
-            int nullIndex = Array.IndexOf(bytes, (byte)0);
 
-            if (nullIndex >= 0)
-            {
-                return Encoding.ASCII.GetString(bytes, 0, nullIndex);
-            }
-
-            return Encoding.ASCII.GetString(bytes);
-        }
 
     }
 }
