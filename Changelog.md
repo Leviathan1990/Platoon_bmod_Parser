@@ -18,7 +18,7 @@ Actual version: V 1.1.
 
 
 
-PREVIOUS EDITIONS
+Previous editions
 =
 
 V 1.0 Initial Edition
