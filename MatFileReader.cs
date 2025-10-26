@@ -6,6 +6,8 @@ using System.Text;
 namespace BmodReader
 {
 
+
+
     public class MatFile
     {
         public uint Magic;              // 0xFFFFA5AD
@@ -199,26 +201,26 @@ namespace BmodReader
                 0x07 => "NormalizeNormals",
                 0x08 => "LocalViewer",
                 0x09 => "ColorVertexEnable",
-                0x0A => "AlphaTestEnable",        // vagy FogEnable (context-dependent)
+                0x0A => "AlphaTestEnable",
                 0x0B => "AlphaFunc",
                 0x0C => "AlphaRef",
-                0x0D => "AlphaBlendEnable",       // vagy ZFunc/TextureFactor
-                0x0E => "SrcBlend",                // vagy TextureFactor (Color4)
-                0x0F => "DestBlend",               // vagy DiffuseMaterialSource
-                0x10 => "ZWriteEnable",            // vagy SpecularMaterialSource
-                0x11 => "ZFunc",                   // vagy AmbientMaterialSource/Layer
-                0x12 => "Layer",                   // vagy EmissiveMaterialSource/TextureSource
-                0x13 => "TextureSource",           // vagy Layer
-                0x14 => "TexCoordIndex",           // vagy TextureSource/ColorArg1
-                0x15 => "ColorArg1",
+                0x0D => "AlphaBlendEnable",
+                0x0E => "TextureFactor",           // or DiffuseMaterialSource
+                0x0F => "DestBlend",               // or DiffuseMaterialSource  
+                0x10 => "ZWriteEnable",            // or SpecularMaterialSource
+                0x11 => "ZFunc",                   // or AmbientMaterialSource
+                0x12 => "Layer",                   // or EmissiveMaterialSource
+                0x13 => "TextureSource",           // or Layer
+                0x14 => "TexCoordIndex",           // or TextureSource
+                0x15 => "ColorArg1",               // or TexCoordIndex
                 0x16 => "ColorArg2",
                 0x17 => "ColorOp",
                 0x18 => "AlphaArg1",
                 0x19 => "AlphaOp",
-                0x1A => "Filter",                  // vagy TextureAddressU
-                0x1B => "TextureAddressU",
-                0x1C => "TextureAddressV",
-                0x1D => "Filter",
+                0x1A => "TextureAddressU",         // ✅ FIXED!
+                0x1B => "TextureAddressV",         // ✅ FIXED!
+                0x1C => "Filter",                  // ✅ FIXED!
+                0x1D => "Filter",                  // ✅ duplicate OK
                 0x1E => "SrcBlend",
                 0x1F => "DestBlend",
                 0x20 => "AlphaRef",
@@ -367,4 +369,6 @@ namespace BmodReader
         public object Value;
  
     }
+
+
 }
