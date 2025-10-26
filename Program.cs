@@ -13,7 +13,7 @@ namespace BmodReader
         private static bool _textureCacheInitialized = false;
 
         // Material cache
-        private static Dictionary<string, string> _materialCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private static Dictionary<string, MatFile> _materialCache = new Dictionary<string, MatFile>(StringComparer.OrdinalIgnoreCase);
         private static bool _materialCacheInitialized = false;
 
         // BMOD file directory (for relative texture search)
@@ -124,50 +124,23 @@ namespace BmodReader
             Console.Write("Indexing textures...");
             Console.ResetColor();
 
-            // Build search paths - CSAK A LEGFONTOSABBAK! (Priority order)
-            List<string> searchRoots = new List<string>
-    {
-        _bmodDirectory,     // 1. HIGHEST PRIORITY: Same directory as BMOD file!
-    };
-
-            // Add parent directory ONLY
-            try
-            {
-                DirectoryInfo bmodDir = new DirectoryInfo(_bmodDirectory);
-
-                if (bmodDir.Parent != null)
-                {
-                    searchRoots.Add(bmodDir.Parent.FullName);  // 2. Parent directory
-                }
-            }
-            catch { }
-
-            // Fallback: search entire Gfx tree
-            searchRoots.Add("Gfx");
-
+            string[] searchRoots = { "gfx", "textures", ".", "..", @"..\..\..\.." };
             int fileCount = 0;
 
-            // Search in PRIORITY ORDER - first found wins!
-            foreach (var root in searchRoots.Distinct())
+            foreach (var root in searchRoots)
             {
-                if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
+                if (!Directory.Exists(root))
                     continue;
 
                 try
                 {
                     var textureFiles = Directory.GetFiles(root, "*.*", SearchOption.AllDirectories)
-                        .Where(f =>
-                        {
-                            var ext = Path.GetExtension(f).ToLower();
-                            return ext == ".dds" || ext == ".tga" || ext == ".png" ||
-                                   ext == ".jpg" || ext == ".bmp";
-                        });
+                        .Where(f => new[] { ".dds", ".tga", ".png", ".jpg", ".bmp" }
+                            .Contains(Path.GetExtension(f).ToLower()));
 
                     foreach (var file in textureFiles)
                     {
                         string fileName = Path.GetFileName(file);
-
-                        // ONLY add if NOT already in cache (maintains priority)
                         if (!_textureCache.ContainsKey(fileName))
                         {
                             _textureCache[fileName] = file;
@@ -175,16 +148,12 @@ namespace BmodReader
                         }
                     }
                 }
-                catch
-                {
-                    // Skip directories we can't access
-                }
+                catch { }
             }
 
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine($" ✓ ({fileCount} textures found)");
             Console.ResetColor();
-            Console.WriteLine();
         }
 
         static void InitializeMaterialCache()
@@ -193,8 +162,21 @@ namespace BmodReader
             Console.Write("Indexing materials...");
             Console.ResetColor();
 
-            string[] searchRoots = { "Shaders", "Materials", ".", "..", @"..\..\..\.." };
+            string exeDir = AppDomain.CurrentDomain.BaseDirectory;
+
+            string[] searchRoots =
+            {
+        Path.Combine(exeDir, "Shaders", "Materials"),
+        Path.Combine(exeDir, "Shaders"),
+        Path.Combine(exeDir, "..", "..", "..", "Shaders", "Materials"),
+        Path.Combine(exeDir, "Materials"),
+        Path.Combine(exeDir, "mat"),
+        exeDir,
+    };
+
             int fileCount = 0;
+            int failedCount = 0;
+            var failedFiles = new List<string>();  // ✅ ÚJ: Track failed files
 
             foreach (var root in searchRoots)
             {
@@ -207,11 +189,25 @@ namespace BmodReader
 
                     foreach (var file in matFiles)
                     {
-                        string fileName = Path.GetFileName(file);
+                        string fileName = Path.GetFileName(file).ToLower();
+
                         if (!_materialCache.ContainsKey(fileName))
                         {
-                            _materialCache[fileName] = file;
-                            fileCount++;
+                            try
+                            {
+                                var matFile = MatFile.Load(file);
+
+                                if (matFile != null)
+                                {
+                                    _materialCache[fileName] = matFile;
+                                    fileCount++;
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                failedCount++;
+                                failedFiles.Add($"{fileName}: {ex.Message}");  // ✅ Store error
+                            }
                         }
                     }
                 }
@@ -219,8 +215,27 @@ namespace BmodReader
             }
 
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($" ✓ ({fileCount} materials found)");
+            Console.Write($" ✓ ({fileCount} materials found");
+            if (failedCount > 0)
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.Write($", {failedCount} failed");
+            }
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($")");
             Console.ResetColor();
+
+            // ✅ ÚJ: Print failed files
+            if (failedFiles.Count > 0)
+            {
+                Console.WriteLine("\n⚠ Failed to load materials:");
+                foreach (var failed in failedFiles.Take(10))  // First 10
+                {
+                    Console.WriteLine($"  • {failed}");
+                }
+                if (failedFiles.Count > 10)
+                    Console.WriteLine($"  ... and {failedFiles.Count - 10} more");
+            }
         }
 
         static string ResolveTexturePath(string textureName)
@@ -256,13 +271,6 @@ namespace BmodReader
             return null;
         }
 
-        static string ResolveMaterialPath(string materialName)
-        {
-            if (_materialCache.TryGetValue(materialName, out string cachedPath))
-                return cachedPath;
-
-            return null;
-        }
 
         // ========================================================================
         // PRINT FUNCTIONS
@@ -715,6 +723,31 @@ namespace BmodReader
             Console.WriteLine();
         }
 
+
+        static void ExportGeometry(BmodFile bmod, string objPath)
+        {
+            Console.WriteLine($"Exporting to: {objPath}");
+            try
+            {
+                // Share caches with ObjExporter
+                ObjExporter.SetTextureCache(_textureCache);
+                ObjExporter.SetMaterialCache(_materialCache);
+
+                ObjExporter.Export(bmod, objPath);
+
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("✓ Export successful!");
+                Console.ResetColor();
+            }
+            catch (Exception ex)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"✗ Export failed: {ex.Message}");
+                Console.WriteLine($"   {ex.StackTrace}");
+                Console.ResetColor();
+            }
+        }
+
         static void PromptExport(BmodFile bmod, string originalPath)
         {
             // Check if we have exportable data
@@ -736,13 +769,14 @@ namespace BmodReader
 
             if (hasGeometry)
             {
-                Console.WriteLine("  [1] Export geometry to OBJ");
+                Console.WriteLine("  [1] Export to same directory as BMOD file");
+                Console.WriteLine("  [2] Export to custom location");
             }
 
             if (hasAnimation)
             {
-                Console.WriteLine("  [2] Export animation to JSON");
-                Console.WriteLine("  [3] Export animation to BVH");
+                Console.WriteLine("  [3] Export animation to JSON");
+                Console.WriteLine("  [4] Export animation to BVH");
             }
 
             Console.WriteLine("  [0] Skip export");
@@ -754,40 +788,115 @@ namespace BmodReader
             Console.WriteLine();
 
             string baseName = Path.GetFileNameWithoutExtension(originalPath);
-            string outputDir = Path.GetDirectoryName(originalPath);
-            if (string.IsNullOrEmpty(outputDir))
-                outputDir = ".";
+            string defaultOutputDir = Path.GetDirectoryName(originalPath);
+            if (string.IsNullOrEmpty(defaultOutputDir))
+                defaultOutputDir = ".";
 
             switch (key.KeyChar)
             {
                 case '1':
                     if (hasGeometry)
                     {
-                        string objPath = Path.Combine(outputDir, baseName + ".obj");
-                        Console.WriteLine($"Exporting to: {objPath}");
-                        try
-                        {
-                            // Share texture cache with ObjExporter
-                            ObjExporter.SetTextureCache(_textureCache);
-                            ObjExporter.Export(bmod, objPath);
-
-                            Console.ForegroundColor = ConsoleColor.Green;
-                            Console.WriteLine("✓ Export successful!");
-                            Console.ResetColor();
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.ForegroundColor = ConsoleColor.Red;
-                            Console.WriteLine($"✗ Export failed: {ex.Message}");
-                            Console.ResetColor();
-                        }
+                        // Export to same directory
+                        string objPath = Path.Combine(defaultOutputDir, baseName + ".obj");
+                        ExportGeometry(bmod, objPath);
                     }
                     break;
 
                 case '2':
+                    if (hasGeometry)
+                    {
+                        // Export to custom location
+                        Console.ForegroundColor = ConsoleColor.Cyan;
+                        Console.WriteLine("═══════════════════════════════════════════════════════════");
+                        Console.WriteLine("  CUSTOM EXPORT LOCATION");
+                        Console.WriteLine("═══════════════════════════════════════════════════════════");
+                        Console.ResetColor();
+                        Console.WriteLine();
+
+                        // Ask for directory
+                        Console.Write("Enter output directory (or press Enter for current): ");
+                        string customDir = Console.ReadLine()?.Trim();
+
+                        if (string.IsNullOrEmpty(customDir))
+                        {
+                            customDir = Directory.GetCurrentDirectory();
+                            Console.ForegroundColor = ConsoleColor.DarkGray;
+                            Console.WriteLine($"Using: {customDir}");
+                            Console.ResetColor();
+                        }
+
+                        // Validate/create directory
+                        if (!Directory.Exists(customDir))
+                        {
+                            Console.ForegroundColor = ConsoleColor.Yellow;
+                            Console.Write($"\nDirectory does not exist. Create it? (Y/N): ");
+                            Console.ResetColor();
+                            var create = Console.ReadLine()?.Trim().ToUpper();
+
+                            if (create == "Y")
+                            {
+                                try
+                                {
+                                    Directory.CreateDirectory(customDir);
+                                    Console.ForegroundColor = ConsoleColor.Green;
+                                    Console.WriteLine($"✓ Directory created: {customDir}");
+                                    Console.ResetColor();
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.ForegroundColor = ConsoleColor.Red;
+                                    Console.WriteLine($"✗ Failed to create directory: {ex.Message}");
+                                    Console.ResetColor();
+                                    return;
+                                }
+                            }
+                            else
+                            {
+                                Console.WriteLine("Export cancelled.");
+                                return;
+                            }
+                        }
+
+                        // Ask for filename
+                        Console.Write($"\nEnter filename (default: {baseName}.obj): ");
+                        string customFilename = Console.ReadLine()?.Trim();
+
+                        if (string.IsNullOrEmpty(customFilename))
+                        {
+                            customFilename = baseName + ".obj";
+                        }
+                        else if (!customFilename.EndsWith(".obj", StringComparison.OrdinalIgnoreCase))
+                        {
+                            customFilename += ".obj";
+                        }
+
+                        string objPath = Path.Combine(customDir, customFilename);
+
+                        // Check if file exists
+                        if (File.Exists(objPath))
+                        {
+                            Console.ForegroundColor = ConsoleColor.Yellow;
+                            Console.Write($"\n⚠ File already exists. Overwrite? (Y/N): ");
+                            Console.ResetColor();
+                            var overwrite = Console.ReadLine()?.Trim().ToUpper();
+
+                            if (overwrite != "Y")
+                            {
+                                Console.WriteLine("Export cancelled.");
+                                return;
+                            }
+                        }
+
+                        Console.WriteLine();
+                        ExportGeometry(bmod, objPath);
+                    }
+                    break;
+
+                case '3':
                     if (hasAnimation)
                     {
-                        string jsonPath = Path.Combine(outputDir, baseName + "_anim.json");
+                        string jsonPath = Path.Combine(defaultOutputDir, baseName + "_anim.json");
                         Console.WriteLine($"Exporting to: {jsonPath}");
                         try
                         {
@@ -805,10 +914,10 @@ namespace BmodReader
                     }
                     break;
 
-                case '3':
+                case '4':
                     if (hasAnimation)
                     {
-                        string bvhPath = Path.Combine(outputDir, baseName + "_anim.bvh");
+                        string bvhPath = Path.Combine(defaultOutputDir, baseName + "_anim.bvh");
                         Console.WriteLine($"Exporting to: {bvhPath}");
                         try
                         {
@@ -832,5 +941,7 @@ namespace BmodReader
                     break;
             }
         }
+
+
     }
 }
