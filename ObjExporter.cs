@@ -10,8 +10,13 @@ namespace BmodReader
     public class ObjExporter
     {
         private static Dictionary<string, string> _textureCache;
+        private static Dictionary<string, MatFile> _materialCache;
 
-        // Initialize with the global texture cache from Program.cs
+        public static void SetMaterialCache(Dictionary<string, MatFile> cache)
+        {
+            _materialCache = cache;
+        }
+
         public static void SetTextureCache(Dictionary<string, string> cache)
         {
             _textureCache = cache;
@@ -30,7 +35,7 @@ namespace BmodReader
             sb.AppendLine($"mtllib {mtlFileName}");
             sb.AppendLine();
 
-            int vertexOffset = 1; // OBJ indices start at 1
+            int vertexOffset = 1;
             int meshIndex = 0;
 
             // Export all MESH chunks
@@ -39,7 +44,6 @@ namespace BmodReader
                 if (mesh.VertChunk == null || mesh.IstrChunk == null)
                     continue;
 
-                // ✅ JAVÍTVA: Try to find material for this mesh
                 string materialName = "default";
                 if (meshIndex < bmod.MateChunks.Count)
                 {
@@ -76,10 +80,10 @@ namespace BmodReader
                 foreach (var vertex in mesh.VertChunk.Vertices)
                 {
                     sb.AppendLine($"vt {vertex.UV.X.ToString(culture)} " +
-                                  $"{(1.0f - vertex.UV.Y).ToString(culture)}");  // Flip V coordinate!
+                                  $"{(1.0f - vertex.UV.Y).ToString(culture)}");
                 }
 
-                // Write faces (triangles)
+                // Write faces
                 var indices = mesh.IstrChunk.Indices;
                 for (int i = 0; i < indices.Count; i += 3)
                 {
@@ -131,7 +135,7 @@ namespace BmodReader
                 foreach (var vertex in obmo.VertChunk.Vertices)
                 {
                     sb.AppendLine($"vt {vertex.UV.X.ToString(culture)} " +
-                                  $"{(1.0f - vertex.UV.Y).ToString(culture)}");  // Flip V!
+                                  $"{(1.0f - vertex.UV.Y).ToString(culture)}");
                 }
 
                 // Write faces
@@ -155,13 +159,14 @@ namespace BmodReader
             File.WriteAllText(outputPath, sb.ToString());
             Console.WriteLine($"✓ Exported OBJ: {outputPath}");
 
-            // Export MTL file
+            // Export MTL
             string mtlPath = Path.Combine(Path.GetDirectoryName(outputPath) ?? ".", mtlFileName);
             ExportMTL(bmod, mtlPath);
             Console.WriteLine($"✓ Exported MTL: {mtlPath}");
+
+            ExportTextures(bmod, outputPath);
         }
 
-        // ✅ JAVÍTVA: ExportMTL metódus
         private static void ExportMTL(BmodFile bmod, string mtlPath)
         {
             var sb = new StringBuilder();
@@ -169,69 +174,89 @@ namespace BmodReader
             sb.AppendLine($"# Materials: {bmod.MateChunks.Count}");
             sb.AppendLine();
 
-            // Export materials from MATE chunks
             var processedMaterials = new HashSet<string>();
 
-            foreach (var mate in bmod.MateChunks)
+            for (int i = 0; i < bmod.MateChunks.Count; i++)
             {
-                // ✅ JAVÍTVA: Get texture from new structure
-                string textureName = GetTextureFromMate(mate);
-                if (string.IsNullOrEmpty(textureName))
+                var mate = bmod.MateChunks[i];
+                string matName = GetTextureFromMate(mate);
+
+                if (string.IsNullOrEmpty(matName))
                     continue;
 
-                string materialName = SanitizeMaterialName(textureName);
+                string materialName = SanitizeMaterialName(matName);
 
-                // Skip duplicates
                 if (processedMaterials.Contains(materialName))
                     continue;
 
                 processedMaterials.Add(materialName);
 
                 sb.AppendLine($"newmtl {materialName}");
-                sb.AppendLine("Ka 1.0 1.0 1.0");  // Ambient
-                sb.AppendLine("Kd 0.8 0.8 0.8");  // Diffuse
-                sb.AppendLine("Ks 0.2 0.2 0.2");  // Specular
-                sb.AppendLine("Ns 10.0");          // Shininess
-                sb.AppendLine("d 1.0");            // Opacity
-                sb.AppendLine("illum 2");          // Illumination model
 
-                // ✅ JAVÍTVA: Find corresponding TEXT chunk
-                var textChunk = bmod.TextChunks.FirstOrDefault(t =>
-                    t.TexturePath.Contains(Path.GetFileNameWithoutExtension(textureName)));
-
-                if (textChunk != null)
+                // Material properties
+                bool hasMatFile = false;
+                if (_materialCache != null && _materialCache.TryGetValue(matName.ToLower(), out MatFile matFile))
                 {
-                    string texturePath = ResolveTexturePath(textChunk.TexturePath);
-                    if (texturePath != null)
-                    {
-                        string textureFileName = Path.GetFileName(texturePath);
-                        string textureExt = Path.GetExtension(textureFileName).ToLower();
+                    hasMatFile = true;
 
-                        if (textureExt == ".dds")
-                        {
-                            string convertedName = Path.ChangeExtension(textureFileName, ".png");
-                            sb.AppendLine($"# map_Kd {convertedName}  # Convert DDS to PNG");
-                            sb.AppendLine($"# Original: {texturePath}");
-                        }
-                        else
-                        {
-                            sb.AppendLine($"map_Kd {textureFileName}");
-                        }
+                    // ✅ FIX: Use Color4.ToMtlString() for proper formatting
+                    if (matFile.PropertyDict.TryGetValue("TextureFactor", out object colorValue) && colorValue is Color4 color)
+                    {
+                        sb.AppendLine($"Ka {color.ToMtlString()}");
+                        sb.AppendLine($"Kd {color.ToMtlString()}");
                     }
                     else
                     {
-                        sb.AppendLine($"# map_Kd {textChunk.TexturePath}  # Texture not found");
+                        sb.AppendLine("Ka 1.0 1.0 1.0");
+                        sb.AppendLine("Kd 0.8 0.8 0.8");
+                    }
+
+                    sb.AppendLine("Ks 0.2 0.2 0.2");
+                }
+                else
+                {
+                    sb.AppendLine("Ka 1.0 1.0 1.0");
+                    sb.AppendLine("Kd 0.8 0.8 0.8");
+                    sb.AppendLine("Ks 0.2 0.2 0.2");
+                }
+
+                sb.AppendLine("Ns 10.0");
+                sb.AppendLine("d 1.0");
+                sb.AppendLine("illum 2");
+
+                // Find texture
+                string textureFile = FindTextureForMaterial(bmod, matName, i);
+
+                if (!string.IsNullOrEmpty(textureFile))
+                {
+                    // ✅ ALWAYS reference TGA (converted from DDS)
+                    string outputTextureName = TextureConverter.GetOutputTextureName(
+                        Path.GetFileName(textureFile),
+                        convertDDS: true
+                    );
+
+                    sb.AppendLine($"map_Kd {outputTextureName}");
+
+                    string ext = Path.GetExtension(textureFile).ToLower();
+                    if (ext == ".dds")
+                    {
+                        sb.AppendLine($"# Converted from: {Path.GetFileName(textureFile)}");
                     }
                 }
                 else
                 {
-                    sb.AppendLine($"# Material file: {textureName}");
+                    sb.AppendLine($"# No texture found for material: {matName}");
+                }
+
+                if (hasMatFile)
+                {
+                    sb.AppendLine($"# Properties loaded from: {matName}");
                 }
 
                 sb.AppendLine();
             }
 
-            // Default material if none exist
+            // Default material
             if (bmod.MateChunks.Count == 0)
             {
                 sb.AppendLine("newmtl default");
@@ -246,21 +271,13 @@ namespace BmodReader
             File.WriteAllText(mtlPath, sb.ToString());
         }
 
-        // ✅ ÚJ HELPER METÓDUS
-        /// <summary>
-        /// Extract texture name from MATE chunk (corrected structure)
-        /// </summary>
         private static string GetTextureFromMate(MateChunk mate)
         {
-            // Find MATERIAL entry
-            var materialEntry = mate.Entries
-                .FirstOrDefault(e => e.TypeName == "MATERIAL");
+            var materialEntry = mate.Entries.FirstOrDefault(e => e.TypeName == "MATERIAL");
 
             if (materialEntry != null)
             {
-                // Find TEXTURE property
-                var textureProp = materialEntry.Properties
-                    .FirstOrDefault(p => p.Name == "TEXTURE");
+                var textureProp = materialEntry.Properties.FirstOrDefault(p => p.Name == "TEXTURE");
 
                 if (textureProp != null)
                 {
@@ -271,12 +288,121 @@ namespace BmodReader
             return null;
         }
 
+        private static string FindTextureForMaterial(BmodFile bmod, string materialName, int materialIndex)
+        {
+            // STRATEGY 0: Check .mat file
+            if (_materialCache != null && _materialCache.TryGetValue(materialName.ToLower(), out MatFile matFile))
+            {
+                Console.WriteLine($"    ✓ Found .mat file: {materialName}");
+
+                if (matFile.PropertyDict.TryGetValue("Layer", out object layerValue))
+                {
+                    string layerStr = layerValue?.ToString() ?? "";
+
+                    if (!string.IsNullOrEmpty(layerStr) && !layerStr.StartsWith("<"))
+                    {
+                        string texturePath = ResolveTexturePath(layerStr);
+                        if (texturePath != null)
+                        {
+                            Console.WriteLine($"      → Texture from .mat (Layer): {Path.GetFileName(texturePath)}");
+                            return texturePath;
+                        }
+                    }
+                }
+
+                Console.WriteLine($"      ℹ .mat file has no texture reference, trying fallback...");
+            }
+
+            // STRATEGY 1: Match by index
+            if (materialIndex < bmod.TextChunks.Count)
+            {
+                var textChunk = bmod.TextChunks[materialIndex];
+                if (!string.IsNullOrEmpty(textChunk.TexturePath))
+                {
+                    string resolvedPath = ResolveTexturePath(textChunk.TexturePath);
+                    if (resolvedPath != null)
+                    {
+                        Console.WriteLine($"    Texture match (by index): {Path.GetFileName(resolvedPath)}");
+                        return resolvedPath;
+                    }
+                }
+            }
+
+            // STRATEGY 2: Match by name
+            string baseName = Path.GetFileNameWithoutExtension(materialName);
+
+            foreach (var textChunk in bmod.TextChunks)
+            {
+                string texturePath = textChunk.TexturePath;
+                string textureBaseName = Path.GetFileNameWithoutExtension(texturePath);
+
+                if (textureBaseName.Equals(baseName, StringComparison.OrdinalIgnoreCase))
+                {
+                    string resolvedPath = ResolveTexturePath(texturePath);
+                    if (resolvedPath != null)
+                    {
+                        Console.WriteLine($"    Texture match (by name): {Path.GetFileName(resolvedPath)}");
+                        return resolvedPath;
+                    }
+                }
+            }
+
+            // STRATEGY 3: Only one texture
+            if (bmod.TextChunks.Count == 1)
+            {
+                string resolvedPath = ResolveTexturePath(bmod.TextChunks[0].TexturePath);
+                if (resolvedPath != null)
+                {
+                    Console.WriteLine($"    Texture match (only one): {Path.GetFileName(resolvedPath)}");
+                    return resolvedPath;
+                }
+            }
+
+            // STRATEGY 4: Global cache
+            if (_textureCache != null)
+            {
+                string[] extensions = { ".dds", ".tga", ".png", ".jpg", ".bmp" };
+                foreach (var ext in extensions)
+                {
+                    string tryName = baseName + ext;
+                    if (_textureCache.TryGetValue(tryName, out string cachedPath))
+                    {
+                        Console.WriteLine($"    Texture match (cache): {tryName}");
+                        return cachedPath;
+                    }
+                }
+            }
+
+            // ✅ STRATEGY 5: Track material fallback
+            if (baseName.Contains("track", StringComparison.OrdinalIgnoreCase))
+            {
+                Console.WriteLine($"    ℹ Track material detected, trying fallback...");
+
+                string[] trackNames = { "track", "trackt54", "tracks", "chain" };
+
+                foreach (var trackName in trackNames)
+                {
+                    foreach (var ext in new[] { ".dds", ".tga" })
+                    {
+                        string tryName = trackName + ext;
+                        if (_textureCache != null && _textureCache.TryGetValue(tryName, out string cachedPath))
+                        {
+                            Console.WriteLine($"    → Track texture fallback: {tryName}");
+                            return cachedPath;
+                        }
+                    }
+                }
+            }
+
+            Console.WriteLine($"    ⚠ No texture found for material: {materialName}");
+            return null;
+        }
+
         private static string SanitizeMaterialName(string name)
         {
             if (string.IsNullOrEmpty(name))
                 return "default";
 
-            // Remove extension and invalid characters
             string baseName = Path.GetFileNameWithoutExtension(name);
             return baseName.Replace(" ", "_").Replace(".", "_");
         }
@@ -286,18 +412,15 @@ namespace BmodReader
             if (_textureCache == null)
                 return null;
 
-            // Try DDS first (priority)
             string baseName = Path.GetFileNameWithoutExtension(textureName);
             string ddsName = baseName + ".dds";
 
             if (_textureCache.TryGetValue(ddsName, out string ddsPath))
                 return ddsPath;
 
-            // Try exact match
             if (_textureCache.TryGetValue(textureName, out string cachedPath))
                 return cachedPath;
 
-            // Try other extensions
             string[] extensions = { ".tga", ".png", ".jpg", ".bmp" };
             foreach (var ext in extensions)
             {
@@ -308,5 +431,109 @@ namespace BmodReader
 
             return null;
         }
+
+        private static void ExportTextures(BmodFile bmod, string objPath)
+        {
+            string outputDir = Path.GetDirectoryName(objPath) ?? ".";
+
+            Console.WriteLine("\nExporting textures...");
+
+            var exportedTextures = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            int successCount = 0;
+            int failCount = 0;
+
+            // ✅ ONLY use TEXT chunks (actual textures, not material names)
+            foreach (var text in bmod.TextChunks)
+            {
+                string textureName = text.TexturePath;
+
+                if (string.IsNullOrEmpty(textureName))
+                    continue;
+
+                // Get base filename (without path)
+                string textureFileName = Path.GetFileName(textureName);
+
+                // Skip duplicates
+                if (exportedTextures.Contains(textureFileName))
+                    continue;
+
+                exportedTextures.Add(textureFileName);
+
+                // Find texture in cache
+                string texturePath = ResolveTexturePath(textureName);
+
+                if (texturePath != null && File.Exists(texturePath))
+                {
+                    // Copy or convert texture
+                    string result = TextureConverter.CopyOrConvertTexture(
+                        texturePath,
+                        outputDir,
+                        convertDDS: true  // DDS → TGA
+                    );
+
+                    if (result != null)
+                        successCount++;
+                    else
+                        failCount++;
+                }
+                else
+                {
+                    Console.WriteLine($"  ⚠ Texture not found: {textureFileName}");
+                    failCount++;
+                }
+            }
+
+            // Summary
+            Console.WriteLine();
+            if (successCount > 0)
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"✓ Textures exported: {successCount} successful");
+                Console.ResetColor();
+            }
+
+            if (failCount > 0)
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine($"⚠ {failCount} textures failed or not found");
+                Console.ResetColor();
+            }
+
+            if (successCount == 0 && failCount == 0)
+            {
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.WriteLine("ℹ No textures to export");
+                Console.ResetColor();
+            }
+        }
+
+
+        // Add this at the end of MatFileReader.cs, AFTER the MatProperty class:
+
+        public struct Color4
+        {
+            public float R, G, B, A;
+
+            public Color4(float r, float g, float b, float a)
+            {
+                // ✅ Normalize from [0-255] to [0-1] if needed
+                R = (r > 1.0f) ? (r / 255.0f) : r;
+                G = (g > 1.0f) ? (g / 255.0f) : g;
+                B = (b > 1.0f) ? (b / 255.0f) : b;
+                A = (a > 1.0f) ? (a / 255.0f) : a;
+            }
+
+            public override string ToString()
+            {
+                return $"RGBA({R:F3}, {G:F3}, {B:F3}, {A:F3})";
+            }
+
+            // Convert to OBJ/MTL format (0-1 range)
+            public string ToMtlString()
+            {
+                return $"{R:F6} {G:F6} {B:F6}";
+            }
+        }
+
     }
 }
