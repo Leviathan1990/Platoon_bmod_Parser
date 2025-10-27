@@ -25,7 +25,7 @@ My parser can now read and generate the .obj, .mtl, and .tga files for all the .
 +  Gfx\Objects\Plants
 +  Gfx\Objects\Weapons
 
-We only have problem with the contents of the following folders:
+*We only have problem with the contents of the following folders:*
 
 +  Gfx\Objects\Additional
 +  Gfx\Objects\Humans
@@ -40,7 +40,7 @@ However, these animation .bmod files are different from the ones that only conta
 
 V 1.0 Initial Edition
 
-[Additions]:
+[*Additions*]:
 
 +  Created bmod parser project
 +  Program now support some .bmod files!
